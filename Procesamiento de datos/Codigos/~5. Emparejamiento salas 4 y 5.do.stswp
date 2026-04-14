@@ -260,7 +260,7 @@ tab  biblioteca if control3==1
 tab  biblioteca if tratamiento==1
 
 
-*** 2.2) Matching a nivel de grupos manual (priorizando o no vulnerabilidad / zona)***
+*** 2.2) Matching a nivel de grupos manual ***
 
 /* 
    Paso 1: Priorizamos el emparejamiento en vulnerabilidad, matrícula y aprendizaje
@@ -529,9 +529,121 @@ ebalance tratamiento max_niv_ed2025 inasistencia2025 , targets(1)
 ebalance tratamiento infra_indice inasistencia2025 , targets(1)
 
 ebalance tratamiento max_niv_ed2025 , targets(1)
-table tratamiento [aw=_webal], statistic(mean vulnerabilidad matricula_total aprendizaje max_niv_ed2025)
+table tratamiento [aw=_webal], statistic(mean vulnerabilidad matricula_total aprendizaje max_niv_ed2025) // no sirve, desalancea lo importante
 
 
 *** 2.3) Matching a nivel de individual manual (con y sin reemplazo; priorizando o no vulnerabilidad / zona) ***
 
+/*
+	Opción 1: Matching automático: elegimos dos vecinos con reemplazo, después nos quedamos con 6.
+*/
+
+use "$data_fin/Data_processed.dta", clear 
+
+* A) Corro el matching
 	
+psmatch2 tratamiento, mahal(vulnerabilidad matricula_total aprendizaje) neighbor(2)
+describe _*
+	* Medias sin el matching
+table tratamiento, statistic(mean vulnerabilidad matricula_total aprendizaje)
+	* Medias con el matching
+table _treated [aw=_weight], statistic(mean vulnerabilidad matricula_total aprendizaje)
+	
+	* Diferencia de medias estandarizadas
+	
+* B) Tabla para comparar las medias
+local xvars inasistencia2023 inasistencia2024 inasistencia2025 inasistencia_prom_años max_niv_ed2025 ///
+            docentes_total prop_ninas edad_doc antig_doc formacion_doc ///
+            Edad_director recibe_refuerzo antig_jardin antig_dir_anios antig_lab_anios ///
+            dir_lic dir_prof dir_dipl Participación_capacitación_docen tiene_patio tiene_material ///
+            tiene_cocina banos_total2 biblioteca cantidad_salas tasa_variacion infra_indice ///
+			vulnerabilidad matricula_total aprendizaje
+			
+tempfile resultados_medias2 base
+save `base', replace
+
+postfile handle2 str40 variable double mean_1 mean_0 diff smd using `resultados_medias2', replace
+
+foreach v of local xvars {
+    
+    * tratadas
+    quietly su `v' if _treated==1
+    local mt = r(mean)
+    local vt = r(Var)
+
+    * controles ponderados
+    quietly su `v' [aw=_weight] if _treated==0
+    local mc = r(mean)
+    local vc = r(Var)
+
+    * difernecia y SMD
+	local d = `mt' - `mc' 
+    local smd = (`mt' - `mc') / sqrt((`vt' + `vc')/2)
+
+	 post handle2  ("`v'") (`mt') (`mc') (`d') (`smd')
+}
+postclose handle2
+use `resultados_medias2', clear
+export excel using "$out_folder/tabla_balance_matching.xlsx", firstrow(variables) replace
+
+
+* C) Saco un control iterando, para tener 6. Solo saco controles con peso 0.5
+
+	* Potenciales controles a eliminar
+use `base', clear
+
+levelsof ID_institucion if _treated==0 & _weight==0.5, local(controles_05)
+display "`controles_05'"
+
+local xvars inasistencia2023 inasistencia2024 inasistencia2025 inasistencia_prom_años max_niv_ed2025 ///
+            docentes_total prop_ninas edad_doc antig_doc formacion_doc ///
+            Edad_director recibe_refuerzo antig_jardin antig_dir_anios antig_lab_anios ///
+            dir_lic dir_prof dir_dipl Participación_capacitación_docen tiene_patio tiene_material ///
+            tiene_cocina banos_total2 biblioteca cantidad_salas tasa_variacion infra_indice ///
+            vulnerabilidad matricula_total aprendizaje
+
+tempfile resultados_medias3
+
+postfile handle3 str40 variable str20 escenario double mean_1 mean_0 diff smd using `resultados_medias3', replace
+
+	* loop sobre controles a eliminar
+foreach c of local controles_05 {
+
+    di "Sacando control `c'"
+
+    preserve
+
+    * eliminar ese control
+    drop if ID_institucion == `c'
+
+    foreach v of local xvars {
+        
+        * tratadas
+        quietly su `v' if _treated==1
+        local mt = r(mean)
+        local vt = r(Var)
+
+        * controles ponderados (sin ese control)
+        quietly su `v' [aw=_weight] if _treated==0
+        local mc = r(mean)
+        local vc = r(Var)
+
+        * diferencia y SMD
+        local d = `mt' - `mc' 
+        local smd = (`mt' - `mc') / sqrt((`vt' + `vc')/2)
+
+        post handle3 ("`v'") ("drop_`c'") (`mt') (`mc') (`d') (`smd')
+    }
+
+    restore
+}
+
+postclose handle3
+
+use `resultados_medias3', clear
+
+reshape wide mean_1 mean_0 diff smd, i(variable) j(escenario) string
+
+export excel using "$out_folder/tabla_balance_matching_eliminando.xlsx", firstrow(variables) replace
+
+use `base', clear
