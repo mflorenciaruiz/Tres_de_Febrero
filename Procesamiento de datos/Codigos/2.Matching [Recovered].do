@@ -1,6 +1,9 @@
 ** Matching
 
-global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Procesamiento de datos"
+// Camibar el main según el usuario:
+global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Tres_de_Febrero/Procesamiento de datos"
+	* global main "ruta/vicky"
+
 global data_folder "$main/Datos"
 global out_folder "$main/Output"
 global data_raw "$data_folder/Raw"
@@ -342,6 +345,7 @@ ebalance tratamiento vulnerabilidad matricula_total infra_indice // NO CONVERGE
 ebalance tratamiento vulnerabilidad inasistencia_prom_años infra_indice
 
 ** Loop para comparar opciones **
+pause on
 local vars vulnerabilidad matricula_total aprendizaje tasa_variacion ///
            inasistencia_prom_años max_niv_ed2025 infra_indice
 		   
@@ -417,33 +421,61 @@ levelsof ID_institucion in 1/6, local(ids_peso7)
 gsort -peso14
 levelsof ID_institucion in 1/6, local(ids_peso14)
 
+gsort -peso23
+levelsof ID_institucion in 1/6, local(ids_peso23)
+
 gsort -peso29
 levelsof ID_institucion in 1/6, local(ids_peso29)
 
+	* Guardo las variables usadas en cada iteración
+levelsof variables3, local(variables3)
+di "`variables3'"
+
+levelsof variables7, local(variables7)
+di "`variables7'"
+
+levelsof variables14, local(variables14)
+di "`variables14'"
+
+levelsof variables23, local(variables23)
+di "`variables23'"
+
+levelsof variables29, local(variables29)
+di "`variables29'"
+
 use `base', clear
+
+	* Genero las indicadoras de variables
+gen variables3 = `variables3'
+gen variables7 = `variables7'
+gen variables14 = `variables14'
+gen variables23 = `variables23'
+gen variables29 = `variables29'
 
 	* Chequeo los id
 di "`ids_peso3'"
 di "`ids_peso7'"
 di "`ids_peso14'"
+di "`ids_peso23'"
 di "`ids_peso29'"
 
 	* Genero las dummies de control para cada caso
 gen control3  = inlist(ID_institucion, 6, 11, 20, 21, 22, 26)
 gen control7  = inlist(ID_institucion, 11, 17, 20, 21, 22, 26)
 gen control14 = inlist(ID_institucion, 2, 7, 11, 12, 22, 26)
+gen control23 = inlist(ID_institucion, )
 gen control29 = inlist(ID_institucion, 6, 11, 15, 17, 20, 26) 
 
-gen cantidad_control = control3 + control7 + control14 + control29
+gen cantidad_control = control3 + control7 + control14 + control23 + control29 // cantidad de veces que una unidad aparece como control
 
 	* Tabla para comparar las medias
 pause on
 preserve
-local xvars inasistencia2023 inasistencia2025 max_niv_ed2025 inasistencia_prom_años ///
+local xvars inasistencia2023 inasistencia2024 inasistencia2025 max_niv_ed2025 inasistencia_prom_años ///
 			matricula_total docentes_total prop_ninas edad_doc antig_doc formacion_doc aprendizaje ///
 			cantidad_salas Edad_director vulnerabilidad antig_jardin infra_indice
 			
-local controls control3 control7 control14 control29
+local controls control3 control7 control14 control23 control29
 
 tempfile resultados
 
@@ -453,15 +485,18 @@ postfile handle str12 control_var str40 variable ///
 foreach c of local controls {
     foreach v of local xvars {
         
-        quietly summarize `v' if `c' == 1
+		* media de los tratados
+        quietly summarize `v' if tratamiento == 1
         local m1 = r(mean)
         local var1 = r(Var)
         
-        quietly summarize `v' if `c' == 0
+		* media de los controles
+        quietly summarize `v' if `c' == 1
         local m0 = r(mean)
         local var0 = r(Var)
-        
-        local d = `m1' - `m0'
+		
+		* diferencia tratados - conttoles
+        local d = `m1' - `m0' 
         local smd = (`m1' - `m0') / sqrt((`var1' + `var0')/2)
         
         post handle ("`c'") ("`v'") (`m1') (`m0') (`d') (`smd')
@@ -471,17 +506,31 @@ foreach c of local controls {
 postclose handle
 
 use `resultados', clear
-pause
+*pause
 
 reshape wide mean_1 mean_0 diff smd, i(variable) j(control_var) string
-pause
+*pause
 
 export excel using "$out_folder/tabla_entropy_balance.xlsx", firstrow(variables) replace
-pause
-
+*pause
 restore
-	
-// comparar media de los 6 mejores
+
+	* El nivel educativo y indice de infraestructura da distinto en el mejor control (control3), exploramos por qué
+sum max_niv_ed2025 if control3==1, detail
+sum max_niv_ed2025 if tratamiento==1, detail
+
+tab  max_niv_ed2025 if control3==1
+tab  max_niv_ed2025 if tratamiento==1
+
+tab  banos_total2 if control3==1
+tab  banos_total2 if tratamiento==1 // la mayor diferencia esta en la cantidad de baños
+
+tab  tiene_patio if control3==1
+tab  tiene_patio if tratamiento==1
+
+tab  biblioteca if control3==1
+tab  biblioteca if tratamiento==1
+
 
 * 2.2) Matching a nivel de grupos manual
 
