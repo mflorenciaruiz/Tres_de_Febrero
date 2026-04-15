@@ -1,6 +1,8 @@
 ** Armado de base de datos
 
-global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Procesamiento de datos"
+// Camibar el main según el usuario:
+global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Tres_de_Febrero/Procesamiento de datos"
+
 global data_folder "$main/Datos"
 global data_raw "$data_folder/Raw"
 global data_int "$data_folder/Intermediate"
@@ -278,6 +280,7 @@ merge 1:1 ID_institución using "$data_int/Salas_inst2.dta"
 * Las que no mergean son instituciones que no tienen sala de 4 o 5 en 2025, las borro
 drop if _merge ==1
 drop _merge
+save "$data_fin/Data_processed.dta", replace
 
 tab max_niv_ed2025 // no hay mucha variabilidad, seria bueno tener %
 sum auh_prom_años if tratamiento==1 // no hay data de auh para los tratados
@@ -300,4 +303,3 @@ egen z_banos_prom = std(banos_prom)
 egen infra_indice = rowmean(z_patio z_biblio z_banos)
 egen infra_indicev1 = rowmean(z_patio z_biblio z_banos_prom)
 
-save "$data_fin/Data_processed.dta", replace
