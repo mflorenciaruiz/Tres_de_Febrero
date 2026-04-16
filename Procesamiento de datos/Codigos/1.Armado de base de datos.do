@@ -489,4 +489,6 @@ egen z_banos_prom = std(banos_prom)
 egen infra_indice = rowmean(z_patio z_biblio z_banos)
 egen infra_indicev1 = rowmean(z_patio z_biblio z_banos_prom)
 
+rename ID_institución ID_institucion 
+
 save "$data_fin/Data_processed_tm.dta", replace
