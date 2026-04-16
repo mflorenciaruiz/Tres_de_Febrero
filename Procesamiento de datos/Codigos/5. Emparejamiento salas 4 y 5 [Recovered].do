@@ -1,11 +1,19 @@
+// Camibar el main según el usuario:
+global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Tres_de_Febrero/Procesamiento de datos"
+
+global data_folder "$main/Datos"
+global data_raw "$data_folder/Raw"
+global data_int "$data_folder/Intermediate"
+global data_fin "$data_folder/Final"
+
 	
 * ----------------------------------------------------------- *
-* 2) Emparejamiento con la data de salas de 4 y 5 unicamente
+*  Emparejamiento con la data de salas de 4 y 5 unicamente
 * ----------------------------------------------------------- *
 
 use "$data_fin/Data_processed.dta", clear 
 
-*** 2.1) Entropy balancing ***
+*** 1) Entropy balancing ***
 
 	/*
 	Uso Entropy Balancing para ver qué controles son los más relevantes (mayor peso)
@@ -260,7 +268,7 @@ tab  biblioteca if control3==1
 tab  biblioteca if tratamiento==1
 
 
-*** 2.2) Matching a nivel de grupos manual ***
+*** 2) Matching a nivel de grupos manual ***
 
 /* 
    Paso 1: Priorizamos el emparejamiento en vulnerabilidad, matrícula y aprendizaje
@@ -532,7 +540,7 @@ ebalance tratamiento max_niv_ed2025 , targets(1)
 table tratamiento [aw=_webal], statistic(mean vulnerabilidad matricula_total aprendizaje max_niv_ed2025) // no sirve, desalancea lo importante
 
 
-*** 2.3) Matching a nivel de individual manual (con y sin reemplazo; priorizando o no vulnerabilidad / zona) ***
+*** 3) Matching a nivel de individual manual (con y sin reemplazo; priorizando o no vulnerabilidad / zona) ***
 
 /*
 	Opción 1: Matching automático: elegimos dos vecinos con reemplazo, después nos quedamos con 6.

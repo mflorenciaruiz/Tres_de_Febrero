@@ -127,9 +127,14 @@ collapse ///
 
 rename id_inst ID_institución
 
+preserve
+import excel "$data_raw/Base_instituciones_3Feb_editadoVA.xlsx", sheet("Datos por institucion") firstrow clear
+save "$data_raw/Instituciones.dta", replace
+restore
+
 merge 1:1 ID_institución using "$data_raw/Instituciones.dta"
 
-* Eliminamos las que no matchean (las que no tienen salas de 4 o 5)
+* Eliminamos las que no matchean (las que no tienen salas de 4 ni 5)
 drop if _merge == 2
 drop _merge
 
@@ -280,13 +285,13 @@ merge 1:1 ID_institución using "$data_int/Salas_inst2.dta"
 * Las que no mergean son instituciones que no tienen sala de 4 o 5 en 2025, las borro
 drop if _merge ==1
 drop _merge
-save "$data_fin/Data_processed.dta", replace
+*save "$data_fin/Data_processed.dta", replace
 
 tab max_niv_ed2025 // no hay mucha variabilidad, seria bueno tener %
 sum auh_prom_años if tratamiento==1 // no hay data de auh para los tratados
 
 * Mergeo para tener la tasa de variación
-merge 1:1 ID_institución using "$data_int/Var_matricula2"
+merge 1:1 ID_institución using "$data_int/Var_matricula3"
 drop if _merge == 2 // jardines sin salas de 4 o 5 en 2025
 drop _merge
 
@@ -295,6 +300,7 @@ rename ID_institución ID_institucion
 tab tratamiento vulnerabilidad
 tab tratamiento recibe_refuerzo
 
+* Creo el indice de infraestructura
 gen banos_prom=banos_total2/matricula_total
 egen z_patio = std(tiene_patio)
 egen z_biblio = std(biblioteca)
@@ -303,3 +309,184 @@ egen z_banos_prom = std(banos_prom)
 egen infra_indice = rowmean(z_patio z_biblio z_banos)
 egen infra_indicev1 = rowmean(z_patio z_biblio z_banos_prom)
 
+save "$data_fin/Data_processed.dta", replace
+
+* --------------------- *
+*   Solo turno mañana
+* --------------------- *
+
+use "$data_int/covariables_sala.dta", clear
+
+* Nos quedamos solo con turno mañana
+keep if Turno == "TM"
+drop tag
+sort id_inst Sala
+egen tag = tag(id_inst Sala)
+order id_inst Sala tag
+
+* Chequeo que todas tengan una sala de 4 y una de 5 
+tab id_inst
+br id_inst Sala Turno if id_inst == 3 | id_inst == 6 | id_inst == 20 | id_inst == 22 | id_inst == 26 // tienen solo sala de 5
+
+gen sala4 = (Sala =="4")
+gen sala5 = (Sala =="5")
+bys id_inst: egen tiene_sala4 = max(sala4)
+bys id_inst: egen tiene_sala5 = max(sala5)
+
+* Colapso a nivel de institución
+collapse ///
+(sum) matricula_total = matricula ///
+(sum) docentes_total = docentes_total ///
+(mean) prop_ninas = _niñas ///
+(mean) edad_doc = edad_doc ///
+(mean) antig_doc = ant_docente ///
+(mean) formacion_doc = formacion_doc ///
+(mean) aprendizaje = aprendizaje ///
+(sum) cantidad_salas = tag ///
+(max) any_tm  ///
+(max) any_tt ///
+(max) tiene_sala4 ///
+(max) tiene_sala5 ///
+[aw=peso], by(id_inst)
+
+rename id_inst ID_institución
+
+merge 1:1 ID_institución using "$data_raw/Instituciones.dta"
+
+* Eliminamos las que no matchean (las que no tienen salas de 4 ni 5, ni turno mañana)
+drop if _merge == 2
+drop _merge
+
+* chequeo las salas de las tratadas 
+br ID_institución tiene_sala4 tiene_sala5 T 
+sort T // hay una tratada que solo tiene sala de 5
+
+* Convertimos a variables numéricas
+gen vulnerabilidad = (Vulnerabilidad_barrio == "SI")
+gen recibe_refuerzo = (Recibe_ref_alim == "SI")
+gen tiene_cocina = (Cocina_comedor == "SI")
+gen tiene_patio = (Patio == "SI")
+gen tiene_material = (Material_didáctico == "SI")
+gen cap_dir = (Participación_capacitación_direc == "SI")
+
+gen banos_ninos = .
+replace banos_ninos = real(regexs(1)) if regexm(Nro_baños, "([0-9]+) baños de niños")
+
+gen banos_adultos = .
+replace banos_adultos = real(regexs(1)) if regexm(Nro_baños, "([0-9]+) de adultos")
+
+gen banos_total2 = banos_ninos + banos_adultos
+replace banos_total2 = banos_adultos if banos_ninos==. & banos_adultos!=.
+replace banos_total2 = banos_ninos if banos_ninos!=. & banos_adultos==.
+
+gen biblioteca = 0
+replace biblioteca = 1 if Biblioteca=="Tiene biblioteca" | Biblioteca=="Tiene biblioteca en el SUM" 
+drop Biblioteca
+
+gen antig_dir_anios = .
+* casos mixtos
+replace antig_dir_anios = real(regexs(1)) + real(regexs(2))/12 ///
+if regexm(Antigüedad_director, "([0-9]+) año[s]?.*?([0-9]+) mes")
+* años
+replace antig_dir_anios = real(regexs(1)) ///
+if regexm(Antigüedad_director, "([0-9]+) año[s]?") ///
+& strpos(Antigüedad_director, "mes")==0
+* meses → pasar a años
+replace antig_dir_anios = real(regexs(1))/12 ///
+if regexm(Antigüedad_director, "([0-9]+) mes") & ///
+strpos(Antigüedad_director, "año")==0
+
+gen antig_lab_anios = .
+* casos mixtos
+replace antig_lab_anios = real(regexs(1)) + real(regexs(2))/12 ///
+if regexm(Antigüedad_laboral, "([0-9]+) año[s]?.*?([0-9]+) mes")
+* años
+replace antig_lab_anios = real(regexs(1)) ///
+if regexm(Antigüedad_laboral, "([0-9]+) año[s]?") ///
+& strpos(Antigüedad_laboral, "mes")==0
+* meses → pasar a años
+replace antig_lab_anios = real(regexs(1))/12 ///
+if regexm(Antigüedad_laboral, "([0-9]+) mes") & ///
+strpos(Antigüedad_laboral, "año")==0
+
+gen dir_lic = strpos(lower(Formación_director), "lic") > 0
+gen dir_prof = strpos(lower(Formación_director), "profesor") > 0
+gen dir_dipl = strpos(lower(Formación_director), "diplom") > 0
+
+gen antig_jardin = Año_inaugaración
+replace antig_jardin = 2024 - Año_inaugaración
+
+gen tratamiento = (T == "SI")
+
+drop Modalidad T Vulnerabilidad_barrio Recibe_ref_alim Año_inaugaración Tipo_gestión Cocina_comedor Nro_baños Antigüedad_director Antigüedad_laboral Material_didáctico Patio  Participación_capacitación_direc
+
+sort  ID_institución
+
+save "$data_int/Salas_inst_tm.dta", replace
+
+** Agrego la información nueva (inasistencias, auh, nivel educativo padres) 
+
+* Mergeo con la matricula con las covariables extra
+import excel "$data_raw/Base_instituciones_3Feb_editadoVA.xlsx", sheet("salas_dta") firstrow clear
+keep if Sala == "4" | Sala == "5"
+keep ID_institución Año Sala Turno Matrícula_total_por_sala
+
+merge 1:1 ID_institución Año Sala Turno using "$data_int/covariables_extra.dta", nogen
+* Filtro TURNO MAÑANA
+keep if Turno == "TM"
+
+* Genero promedios por institucion
+preserve
+tempfile promedios_inst
+collapse ///
+(mean) inasistencia_prom_años = inasistencia ///
+(mean) auh_prom_años = auh ///
+(max) max_niv_ed_años = max_niv_ed ///
+[aw=Matrícula_total_por_sala], by(ID_institución)
+save `promedios_inst'
+restore
+
+* Colapso a nivel de institución-año
+collapse ///
+(mean) inasistencia ///
+(mean) auh ///
+(max) max_niv_ed ///
+[aw=Matrícula_total_por_sala], by(ID_institución Año)
+
+merge m:1 ID_institución using `promedios_inst', nogen
+
+* Paso a wide
+reshape wide inasistencia auh max_niv_ed, i(ID_institución) j(Año)
+
+* Borro las variables de educacion 2023, 2024 y el maximo de los 3 años porque no hay data para los dos primeros años
+drop max_niv_ed2023 max_niv_ed2024 max_niv_ed_años
+
+* Uno con la data de salas e instituciones
+merge 1:1 ID_institución using "$data_int/Salas_inst_tm.dta"
+* Las que no mergean son instituciones que no tienen sala de 4 o 5 en 2025 (pero sí tenian en otros años), las borro
+drop if _merge ==1
+drop _merge
+
+tab max_niv_ed2025 // no hay mucha variabilidad, seria bueno tener %
+sum auh_prom_años if tratamiento==1 // no hay data de auh para los tratados
+
+* Mergeo para tener la tasa de variación
+merge 1:1 ID_institución using "$data_int/Var_matricula3"
+drop if _merge == 2 // jardines sin salas de 4 o 5 en 2025
+drop _merge
+
+rename ID_institución ID_institucion
+
+tab tratamiento vulnerabilidad
+tab tratamiento recibe_refuerzo
+
+* Creo el indice de infraestructura
+gen banos_prom=banos_total2/matricula_total
+egen z_patio = std(tiene_patio)
+egen z_biblio = std(biblioteca)
+egen z_banos = std(banos_total2)
+egen z_banos_prom = std(banos_prom)
+egen infra_indice = rowmean(z_patio z_biblio z_banos)
+egen infra_indicev1 = rowmean(z_patio z_biblio z_banos_prom)
+
+save "$data_fin/Data_processed_tm.dta", replace
