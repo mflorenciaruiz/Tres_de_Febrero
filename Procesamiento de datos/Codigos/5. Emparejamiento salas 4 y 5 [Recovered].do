@@ -2,10 +2,10 @@
 global main "/Users/florenciaruiz/Library/Mobile Documents/com~apple~CloudDocs/RA Maria/Tres de Febrero/Tres_de_Febrero/Procesamiento de datos"
 
 global data_folder "$main/Datos"
+global out_folder  "$main/Output"
 global data_raw "$data_folder/Raw"
 global data_int "$data_folder/Intermediate"
 global data_fin "$data_folder/Final"
-
 	
 * ----------------------------------------------------------- *
 *  Emparejamiento con la data de salas de 4 y 5 unicamente
@@ -280,6 +280,8 @@ tab  biblioteca if tratamiento==1
    Imponemos la condición de que ningun desvio sea mayor a |0,25|
 */
 
+* 2.1) Priorizando matricula tota, aprendiazaje y vulnerabilidad
+
 use "$data_fin/Data_processed.dta", clear 
 
 	* A) Definir candidatos a control: todos los no tratados
@@ -538,6 +540,159 @@ ebalance tratamiento infra_indice inasistencia2025 , targets(1)
 
 ebalance tratamiento max_niv_ed2025 , targets(1)
 table tratamiento [aw=_webal], statistic(mean vulnerabilidad matricula_total aprendizaje max_niv_ed2025) // no sirve, desalancea lo importante
+
+* 2.1) Priorizando matricula tota, inasistencia y vulnerabilidad
+
+use "$data_fin/Data_processed.dta", clear 
+	
+	** Paso 1:
+	
+	* A) Definir candidatos a control: todos los no tratados
+levelsof ID_institucion if tratamiento == 0, local(ctrl_all)
+
+display "`ctrl_all'"
+	
+	* B) Variables de balance
+local vars matricula_total vulnerabilidad inasistencia2025
+			 
+	* C) Archivo para guardar resultados
+tempfile resultados_match6
+tempname memhold
+
+postfile `memhold' str100 controles double suma_smd max_smd using `resultados_match6', replace
+
+	* D) Loop sobre todas las combinaciones posibles de 6 controles
+foreach a of local ctrl_all {
+    foreach b of local ctrl_all {
+        foreach c of local ctrl_all {
+            foreach d of local ctrl_all {
+                foreach e of local ctrl_all {
+                    foreach f of local ctrl_all {
+
+                        * evitar repeticiones y permutaciones
+                        if (`a' < `b' & `b' < `c' & `c' < `d' & `d' < `e' & `e' < `f') {
+
+                            preserve
+								* creo un grupo temporal con 4 tratados y 6 controles
+                                gen grupo_tmp = .
+                                replace grupo_tmp = 1 if tratamiento == 1
+                                replace grupo_tmp = 0 if inlist(ID_institucion, `a', `b', `c', `d', `e', `f')
+								
+								* eliminamos el resto de las obs
+                                keep if grupo_tmp < .
+								
+								* locales para guardar la suma de diferencias estandarizadas y la peor diferencia estandarizada
+                                local suma = 0
+                                local maximo = 0
+								local valido = 1
+
+                                foreach v of local vars {
+
+                                    quietly summarize `v' if grupo_tmp == 0
+                                    local mc = r(mean)
+                                    local sdc = r(sd)
+
+                                    quietly summarize `v' if grupo_tmp == 1
+                                    local mt = r(mean)
+                                    local sdt = r(sd)
+
+                                    local sdpool = sqrt((`sdt'^2 + `sdc'^2)/2)
+
+                                    if `sdpool' > 0 {
+                                        local smd = abs((`mt' - `mc') / `sdpool')
+										* chequear umbral
+										if `smd' > 0.5 { // cambio a 0.5 porque con 0.25 no da
+											local valido = 0
+											}
+										
+                                        local suma = `suma' + `smd'
+
+                                        if `smd' > `maximo' {
+                                            local maximo = `smd'
+                                        }
+                                    }
+                                }
+
+                                local combo "`a' `b' `c' `d' `e' `f'"
+								
+                                if `valido' == 1 {
+									post `memhold' ("`combo'") (`suma') (`maximo')
+									}
+                            restore
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+postclose `memhold'
+
+	* E) Ver mejores combinaciones
+use `resultados_match6', clear
+sort max_smd suma_smd
+list in 1/5, noobs // me quedo con las primeras 5 opciones 
+
+** Vuelvo a la data final para crear la tabla de comparacion de medias
+	
+use "$data_fin/Data_processed.dta", clear 
+
+	* Genero las dummies de control para cada caso
+gen control1 = inlist(ID_institucion, 6, 11, 20, 22, 23, 26)
+gen control2 = inlist(ID_institucion, 6, 14, 20, 22, 23, 26)
+gen control3 = inlist(ID_institucion, 6, 7, 14, 20, 22, 26)
+gen control4 = inlist(ID_institucion, 6, 7, 20, 22, 23, 26)
+gen control5 = inlist(ID_institucion, 6, 11, 14, 20, 22, 26)
+
+gen cantidad_control = control1 + control2 + control3 + control4 + control5 // cantidad de veces que una unidad aparece como control
+
+	* Tabla para comparar las medias
+local xvars inasistencia2023 inasistencia2024 inasistencia2025 inasistencia_prom_años max_niv_ed2025 ///
+            docentes_total prop_ninas edad_doc antig_doc formacion_doc ///
+            Edad_director recibe_refuerzo antig_jardin antig_dir_anios antig_lab_anios ///
+            dir_lic dir_prof dir_dipl Participación_capacitación_docen tiene_patio tiene_material ///
+            tiene_cocina banos_total2 biblioteca cantidad_salas tasa_variacion infra_indice ///
+			vulnerabilidad matricula_total aprendizaje
+			
+local controls control1 control2 control3 control4 control5
+
+tempfile resultados_medias
+
+postfile handle str12 control_var str40 variable ///
+    double mean_1 mean_0 diff smd using `resultados_medias', replace
+
+foreach c of local controls {
+	di "control `c'"
+	
+    foreach v of local xvars {
+		di "variable `v'"
+        
+		* media de los tratados
+        quietly summarize `v' if tratamiento == 1
+        local m1 = r(mean)
+        local var1 = r(Var)
+        
+		* media de los controles
+        quietly summarize `v' if `c' == 1
+        local m0 = r(mean)
+        local var0 = r(Var)
+		
+		* diferencia tratados - conttoles
+        local d = `m1' - `m0' 
+        local smd = (`m1' - `m0') / sqrt((`var1' + `var0')/2)
+        
+        post handle ("`c'") ("`v'") (`m1') (`m0') (`d') (`smd')
+    }
+}
+
+postclose handle
+
+use `resultados_medias', clear
+replace smd =0 if smd==.
+reshape wide mean_1 mean_0 diff smd, i(variable) j(control_var) string
+
+export excel using "$out_folder/tabla_balance_bes_subset_inasis.xlsx", firstrow(variables) replace
 
 
 *** 3) Matching a nivel de individual manual (con y sin reemplazo; priorizando o no vulnerabilidad / zona) ***
